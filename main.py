@@ -4,7 +4,7 @@ import PIL.Image
 import torch
 import legacy
 
-network_pkl = "stylegan2-ada-pytorch/networks/ffhq.pkl"
+network_pkl = "networks/ffhq.pkl"
 outdir = "out"
 seeds = [600, 601]
 truncation_psi = 1
