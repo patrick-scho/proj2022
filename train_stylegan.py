@@ -245,7 +245,7 @@ if __name__ == '__main__':
         # Since we just updated D, perform another forward pass of all-fake batch through D
         output = netD(fake, None).view(-1)
         # wasserstein gan
-        output = sig(output / 10)
+        #output = sig(output / 10)
         print(output)
         # Calculate G's loss based on this output
         errG = criterion(output, label)
