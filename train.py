@@ -18,9 +18,7 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
 import deodr
-from deodr import differentiable_renderer
-from deodr.pytorch import triangulated_mesh_pytorch
-from deodr.pytorch import differentiable_renderer_pytorch
+from deodr import ColoredTriMesh, differentiable_renderer
 from scipy.spatial.transform import Rotation
 import trimesh
 import imageio.v3 as iio
@@ -31,129 +29,21 @@ import PIL.Image
 
 
 
-def ColoredTriMeshPytorch_from_trimesh(mesh):
-    """Get the vertex colors, texture coordinates, and material properties
-    from a :class:`~trimesh.base.Trimesh`.
-    """
-    colors = None
-    uv = None
-    texture = None
-
-    # If the trimesh visual is undefined, return none for both
-
-    # Process vertex colors
-    if mesh.visual.kind == "vertex":
-        colors = mesh.visual.vertex_colors.copy()
-        if colors.ndim == 2 and colors.shape[1] == 4:
-            colors = colors[:, :3]
-        colors = colors.astype(np.float) / 255
-
-    # Process face colors
-    elif mesh.visual.kind == "face":
-        raise BaseException(
-            "not supported yet, will need antialisaing at the seams"
-        )
-
-    # Process texture colors
-    elif mesh.visual.kind == "texture":
-        # Configure UV coordinates
-        if mesh.visual.uv is not None:
-
-            texture = np.array(mesh.visual.material.image) / 255
-            texture.setflags(write=0)
-
-            if texture.shape[2] == 4:
-                texture = texture[:, :, :3]  # removing alpha channel
-
-            uv = (
-                np.column_stack(
-                    (
-                        (mesh.visual.uv[:, 0]) * texture.shape[1],
-                        (1 - mesh.visual.uv[:, 1]) * texture.shape[0],
-                    )
-                )
-                - 0.5
-            )
-
-    # merge identical 3D vertices even if their uv are different to keep surface
-    # manifold. Trimesh seems to split vertices that have different uvs (using
-    # unmerge_faces texture.py), making the surface not watertight, while there
-    # were only seems in the texture.
-
-    vertices, return_index, inv_ids = np.unique(
-        mesh.vertices, axis=0, return_index=True, return_inverse=True
-    )
-    faces = inv_ids[mesh.faces].astype(np.int32)
-    if colors is not None:
-        colors2 = colors[return_index, :]
-        if np.any(colors != colors2[inv_ids, :]):
-            raise (
-                BaseException(
-                    "vertices at the same 3D location should have the same color"
-                    "for the rendering to be differentiable"
-                )
-            )
-    else:
-        colors2 = None
-
-    return triangulated_mesh_pytorch.ColoredTriMeshPytorch(
-        faces,
-        torch.tensor(vertices),
-        clockwise=False,
-        faces_uv=torch.tensor(mesh.faces),
-        uv=uv,
-        texture=texture,
-        colors=colors2,
-    )
-
-class PerspectiveCameraPytorch(differentiable_renderer_pytorch.CameraPytorch):
-    """Camera with perspective projection."""
-
-    def __init__(self, width, height, fov, camera_center, rot=None, distortion=None):
-        """Perspective camera constructor.
-
-        - width: width of the camera in pixels
-        - height: eight of the camera in pixels
-        - fov: horizontal field of view in degrees
-        - camera_center: center of the camera in world coordinate system
-        - rot: 3x3 rotation matrix word to camera (x_cam = rot.dot(x_world))\
-            default to identity
-        - distortion: distortion parameters
-        """
-        if rot is None:
-            rot = np.eye(3)
-        focal = 0.5 * width / np.tan(0.5 * fov * np.pi / 180)
-        focal_x = focal
-        pixel_aspect_ratio = 1
-        focal_y = focal * pixel_aspect_ratio
-        trans = -rot.T.dot(camera_center)
-        cx = width / 2
-        cy = height / 2
-        intrinsic = np.array([[focal_x, 0, cx], [0, focal_y, cy], [0, 0, 1]])
-        extrinsic = np.column_stack((rot, trans))
-        super().__init__(
-            extrinsic=torch.tensor(extrinsic),
-            intrinsic=torch.tensor(intrinsic),
-            distortion=distortion,
-            width=width,
-            height=height,
-        )
-
 def default_scene(
     obj_file, width, height, use_distortion=True, integer_pixel_centers=True
 ):
     mesh_trimesh = trimesh.load(obj_file)
-    mesh = ColoredTriMeshPytorch_from_trimesh(mesh_trimesh)
+    mesh = ColoredTriMesh.from_trimesh(mesh_trimesh)
     # rot = Rotation.from_euler("xyz", [180, 0, 0], degrees=True).as_matrix()
     rot = Rotation.from_euler("xyz", [180, 0, 0], degrees=True).as_matrix()
 
-    camera = PerspectiveCameraPytorch(
+    camera = differentiable_renderer.PerspectiveCamera(
         width, height, 60, (0, 1.7, 0.3), rot)
     if use_distortion:
         camera.distortion = np.array([-0.5, 0.5, 0, 0, 0])
 
     bg_color = np.array((0.8, 0.8, 0.8))
-    scene = differentiable_renderer_pytorch.Scene3DPytorch()
+    scene = differentiable_renderer.Scene3D()
     scene.integer_pixel_centers = integer_pixel_centers
     light_ambient = 0
     light_directional = 0.4 * np.array([1, -3, -0.5])
